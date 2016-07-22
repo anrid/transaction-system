@@ -63,6 +63,31 @@ function getTransactionHistoryForAccountOwner (userId, max = 10) {
   return Account.getTransactionHistoryForAccountOwner(userId, max)
 }
 
+const getTransactionHistoryForAccountOwnerWithDetail =  P.coroutine(function * (userId, max=10) {
+  T.String(userId)
+  var transactions = yield Account.getTransactionHistoryForAccountOwnerWithDetail(userId, max)
+  return transactions.map(function(t) {
+    return {
+       id: t.id,
+       amount: t.amount,
+       created: t.created,
+       type:t.type,
+       from: {
+          id: t.fromUserId,
+          name: t.fromUserName,
+          email: t.fromUserEmail,
+          profile: JSON.parse(t.fromUserProfile)
+       },
+       to: {
+          id: t.toUserId,
+          name: t.toUserName,
+          email: t.toUserEmail,
+          profile: JSON.parse(t.toUserProfile)
+       }
+    }
+  })
+})
+
 function requireAccountAsOwner (accountId, userId) {
   return Account.getById(accountId)
   .tap((account) => {
@@ -142,6 +167,7 @@ module.exports = {
   getTransactionHistory,
   getTransactionHistoryForUser,
   getTransactionHistoryForAccountOwner,
+  getTransactionHistoryForAccountOwnerWithDetail,
   requireAccountAsOwner,
   transfer,
   transferByUserId,
