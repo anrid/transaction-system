@@ -6,6 +6,7 @@ const Boom = require('boom')
 
 const Account = require('../models/account')
 const Stats = require('../models/stats')
+const Constants = require('../constants')
 
 // Generates an account name like 'CURRENCY_1' e.g.;
 // 'USD_1' if user no existing USD currency accounts.
@@ -69,6 +70,8 @@ const getTransactionHistoryForAccountOwnerWithDetail =  P.coroutine(function * (
   return transactions.map(function(t) {
     return {
        id: t.id,
+       description: t.description,
+       status: t.status,
        amount: t.amount,
        created: t.created,
        type:t.type,
@@ -83,7 +86,9 @@ const getTransactionHistoryForAccountOwnerWithDetail =  P.coroutine(function * (
           name: t.toUserName,
           email: t.toUserEmail,
           profile: JSON.parse(t.toUserProfile)
-       }
+       },
+       status: Constants.TRANSACTION_STATUS[t.status],
+       description: t.description
     }
   })
 })
