@@ -6,6 +6,7 @@ const Boom = require('boom')
 
 const Account = require('../models/account')
 const Stats = require('../models/stats')
+const Constants = require('../constants')
 
 // Generates an account name like 'CURRENCY_1' e.g.;
 // 'USD_1' if user no existing USD currency accounts.
@@ -23,10 +24,14 @@ const create = P.coroutine(function * (opts, actorId) {
     opts.name = yield generateNewAccountName(actorId, opts.currency)
   }
 
+  if(!opts.type) {
+    opts.type = Account.TYPE_NORMAL
+  }
+
   const result = yield Account.create({
     userId: actorId,
     // Type is hard-coded at this point.
-    type: Account.TYPE_NORMAL,
+    type: opts.type,
     name: opts.name,
     currency: opts.currency
   })
@@ -58,6 +63,35 @@ function getTransactionHistoryForAccountOwner (userId, max = 10) {
   T.String(userId)
   return Account.getTransactionHistoryForAccountOwner(userId, max)
 }
+
+const getTransactionHistoryForAccountOwnerWithDetail =  P.coroutine(function * (actorId, max=10, userId) {
+  T.String(actorId)
+  var transactions = userId ? yield Account.getTransactionHistoryForAccountOwnerWithDetailByToUserId(actorId, userId, max): yield Account.getTransactionHistoryForAccountOwnerWithDetail(actorId, max)
+  return transactions.map(function(t) {
+    return {
+       id: t.id,
+       description: t.description,
+       status: t.status,
+       amount: t.amount,
+       created: t.created,
+       type:t.type,
+       from: {
+          id: t.fromUserId,
+          name: t.fromUserName,
+          email: t.fromUserEmail,
+          profile: JSON.parse(t.fromUserProfile)
+       },
+       to: {
+          id: t.toUserId,
+          name: t.toUserName,
+          email: t.toUserEmail,
+          profile: JSON.parse(t.toUserProfile)
+       },
+       status: Constants.TRANSACTION_STATUS[t.status],
+       description: t.description
+    }
+  })
+})
 
 function requireAccountAsOwner (accountId, userId) {
   return Account.getById(accountId)
@@ -101,6 +135,30 @@ const transfer = P.coroutine(function * (opts, actorId) {
   return yield Account.getTransactionHistoryById(transactionHistoryId)
 })
 
+const transferByUserId = P.coroutine(function * (opts, actorId) {
+  T.String(opts.fromAccountId)
+  T.String(opts.toUserId)
+  T.String(opts.currency)
+  T.String(opts.amount)
+  T.String(actorId)
+
+  yield requireAccountAsOwner(opts.fromAccountId, actorId)
+
+  // Fetch target account.
+  const toAccount = yield Account.getMainAccountByUserId(opts.toUserId)
+  if (!toAccount) {
+    throw Boom.notFound('Could not find target account')
+  }
+
+  // Make the transfer.
+  const transactionHistoryId = yield Account.transferByUserId(opts)
+  // Update transfer stats.
+  yield Stats.updateTransferStats(actorId, toAccount.id, toAccount.userId)
+
+  // Return latest transaction history.
+  return yield Account.getTransactionHistoryById(transactionHistoryId)
+})
+
 const getAll = P.coroutine(function * (actorId) {
   T.String(actorId)
   const accounts = yield Account.getByUserId(actorId)
@@ -114,7 +172,9 @@ module.exports = {
   getTransactionHistory,
   getTransactionHistoryForUser,
   getTransactionHistoryForAccountOwner,
+  getTransactionHistoryForAccountOwnerWithDetail,
   requireAccountAsOwner,
   transfer,
+  transferByUserId,
   getAll
 }

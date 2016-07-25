@@ -109,6 +109,40 @@ function setupEndpoints (server) {
     })
   })
 
+  const transferByUserIdSchema = Joi.object().keys({
+    fromAccountId: Joi.string().min(1).required(),
+    toUserId: Joi.string().min(1).required(),
+    amount: Joi.string().min(1).required(),
+    currency: Joi.string().min(3).max(3).trim().uppercase().required()
+  })
+  server.route({
+    method: 'POST',
+    path: '/api/transferByUserId',
+    handler: createHandler((request, reply) => {
+      const valid = validate(request.payload, transferByUserIdSchema)
+      const actorId = request.auth.credentials.id
+      return AccountService.transferByUserId(valid, actorId)
+      .then((transactionHistory) => reply({ transactionHistory }))
+    })
+  })
+
+  const depositSchema= Joi.object().keys({
+    accountId: Joi.string().min(1).required(),
+    amount: Joi.string().min(1).required(),
+    currency: Joi.string().min(3).max(3).trim().uppercase().required()
+  })
+
+  server.route({
+    method: 'POST',
+    path: '/api/deposit',
+    handler: createHandler((request, reply) => {
+      const valid = validate(request.payload, depositSchema)
+      const actorId = request.auth.credentials.id
+      return AccountService.deposit(valid, actorId)
+      .then((transactionHistory) => reply({ transactionHistory }))
+    })
+  })
+
   server.route({
     method: 'GET',
     path: '/api/history/{accountId}',
@@ -117,6 +151,19 @@ function setupEndpoints (server) {
       const max = request.query.max || 10
       const actorId = request.auth.credentials.id
       return AccountService.getTransactionHistoryForUser(accountId, max, actorId)
+      .then((transactionHistory) => reply({ transactionHistory }))
+    })
+  })
+
+  server.route({
+    method: 'GET',
+    path: '/api/history/me',
+    handler: createHandler((request, reply) => {
+      const accountId = request.params.accountId
+      const max = request.query.max || 10
+      const userId = request.query.userId
+      const actorId = request.auth.credentials.id
+      return AccountService.getTransactionHistoryForAccountOwnerWithDetail(actorId, max, userId)
       .then((transactionHistory) => reply({ transactionHistory }))
     })
   })

@@ -8,6 +8,7 @@ const T = require('tcomb')
 
 const validate = require('./validate')
 
+const TYPE_MAIN = 11
 const TYPE_NORMAL = 1
 const TYPE_INTERNAL = 10
 const ACCOUNT_WORLD = '100'
@@ -58,6 +59,10 @@ function getByUserId (userId) {
   return Db.query('SELECT * FROM account WHERE userId = ? ORDER BY id ASC', [userId])
 }
 
+function getMainAccountByUserId(userId) {
+  return Db.findOne('SELECT * FROM account WHERE userId = ? AND type = ? ', [userId,TYPE_MAIN])
+}
+
 function getTransactionHistory (accountId, max) {
   return Db.query(`
     SELECT * FROM transaction_log WHERE
@@ -78,7 +83,48 @@ function getTransactionHistoryForAccountOwner (userId, max) {
     ORDER BY id DESC LIMIT ?
     `, [userId, userId, max]
   )
-}
+} 
+
+function getTransactionHistoryForAccountOwnerWithDetail (actorId, max) {
+  return Db.query(`
+    SELECT t.id,t.description,t.status, t.amount,t.created,t.type,t.fromUserId,t.toUserId,
+      uf.name AS fromUserName,uf.email AS fromUserEmail,uf.profile AS fromUserProfile,
+      ut.name AS toUserName,ut.email AS toUserEmail,ut.profile AS toUserProfile FROM 
+      (SELECT t.id,t.description,t.status, t.amount,t.created,t.type,af.userId AS fromUserId,at.userId AS toUserId FROM
+        (SELECT * FROM transaction_log t WHERE
+          (
+            (fromAccountId IN (SELECT id FROM account WHERE userId = ?))
+            OR
+            (toAccountId IN (SELECT id FROM account WHERE userId = ?))
+          )
+        ) t JOIN account af ON t.fromAccountId =af.id JOIN account at ON t.toAccountId = at.id
+      ) t JOIN user uf ON t.fromUserId = uf.id JOIN user ut ON t.toUserId = ut.id 
+    ORDER BY id DESC LIMIT ?
+    `, [actorId, actorId, max]
+  )
+} 
+
+function getTransactionHistoryForAccountOwnerWithDetailByToUserId (actorId, userId, max) {
+  return Db.query(`
+    SELECT t.id,t.description,t.status, t.amount,t.created,t.type,t.fromUserId,t.toUserId,
+      uf.name AS fromUserName,uf.email AS fromUserEmail,uf.profile AS fromUserProfile,
+      ut.name AS toUserName,ut.email AS toUserEmail,ut.profile AS toUserProfile FROM 
+      (SELECT t.id,t.description,t.status, t.amount,t.created,t.type,af.userId AS fromUserId,at.userId AS toUserId FROM
+        (SELECT * FROM transaction_log t WHERE
+          (
+            (
+              (fromAccountId IN (SELECT id FROM account WHERE userId = ?)) AND (toAccountId IN (SELECT id FROM account WHERE userId = ?))
+            ) OR
+            (
+              (fromAccountId IN (SELECT id FROM account WHERE userId = ?)) AND (toAccountId IN (SELECT id FROM account WHERE userId = ?))
+            )
+          )
+        ) t JOIN account af ON t.fromAccountId =af.id JOIN account at ON t.toAccountId = at.id
+      ) t JOIN user uf ON t.fromUserId = uf.id JOIN user ut ON t.toUserId = ut.id 
+    ORDER BY id DESC LIMIT ?
+    `, [actorId,userId, userId, actorId, max]
+  )
+} 
 
 function getTransactionHistoryById (id) {
   return Db.findOne('SELECT * FROM transaction_log WHERE id = ?', [id])
@@ -198,11 +244,49 @@ function _transfer (conn, opts) {
   })
 }
 
+function _transferByUserId (conn, opts) {
+  return P.try(() => {
+    return conn.queryAsync(
+      'SELECT * FROM account WHERE id = ? FOR UPDATE',
+      [opts.fromAccountId]
+    )
+    .then((fromAccount) => {
+      if (!fromAccount.length) {
+        throw Boom.notFound(`Could not find source account id ${opts.fromAccountId} currency ${opts.currency}`)
+      }
+      return conn.queryAsync(
+        'SELECT * FROM account WHERE userId = ? AND type = ? FOR UPDATE',
+        [opts.toUserId, TYPE_MAIN]
+      )
+      .then((toUserId) => {
+        if (!toUserId.length) {
+          throw Boom.notFound(`Could not find target user id ${opts.toUserId}`)
+        }
+
+        return _debitCredit(conn, {
+          fromAccountId: fromAccount[0].id,
+          toAccountId: toUserId[0].id,
+          amount: opts.amount,
+          transactionType: opts.transactionType
+        })
+      })
+      .then((transactionHistoryId) => (
+        conn.commitAsync()
+        .then(() => transactionHistoryId)
+      ))
+    })
+  })
+}
+
 function transfer (opts) {
   return Db.transaction((conn) => _transfer(conn, opts))
 }
 
+function transferByUserId(opts) {
+  return Db.transaction((conn) => _transferByUserId(conn, opts))
+}
 module.exports = {
+  TYPE_MAIN,
   TYPE_NORMAL,
   TYPE_INTERNAL,
   ACCOUNT_WORLD,
@@ -223,6 +307,9 @@ module.exports = {
   getTransactionHistory,
   getTransactionHistoryById,
   getTransactionHistoryForAccountOwner,
-
+  getTransactionHistoryForAccountOwnerWithDetail,
+  getTransactionHistoryForAccountOwnerWithDetailByToUserId,
+  getMainAccountByUserId,
+  transferByUserId,
   transfer
 }
